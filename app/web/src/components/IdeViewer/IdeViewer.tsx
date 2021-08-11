@@ -7,17 +7,15 @@ import {
   GizmoHelper,
   GizmoViewport,
   OrbitControls,
+  Environment,
+  useTexture,
 } from '@react-three/drei'
 import { useEdgeSplit } from 'src/helpers/hooks/useEdegeSplit'
 import { Vector3 } from 'three'
 import { requestRender } from 'src/helpers/hooks/useIdeState'
 import texture from './dullFrontLitMetal.png'
-import { TextureLoader } from 'three/src/loaders/TextureLoader'
 import Customizer from 'src/components/Customizer/Customizer'
 import DelayedPingAnimation from 'src/components/DelayedPingAnimation/DelayedPingAnimation'
-
-const loader = new TextureLoader()
-const colorMap = loader.load(texture)
 
 const thresholdAngle = 12
 
@@ -25,9 +23,12 @@ function Asset({ geometry: incomingGeo }) {
   const mesh = useEdgeSplit((thresholdAngle * Math.PI) / 180, true, incomingGeo)
   const edges = React.useMemo(
     () =>
-      incomingGeo.length ? null : new THREE.EdgesGeometry(incomingGeo, thresholdAngle),
+      incomingGeo.length
+        ? null
+        : new THREE.EdgesGeometry(incomingGeo, thresholdAngle),
     [incomingGeo]
   )
+  const colorMap = useTexture(texture)
   if (!incomingGeo) return null
 
   if (incomingGeo.length)
@@ -38,10 +39,19 @@ function Asset({ geometry: incomingGeo }) {
   return (
     <group dispose={null}>
       <mesh ref={mesh} scale={[1, 1, 1]} geometry={incomingGeo}>
-        <meshStandardMaterial map={colorMap} color="#F472B6" />
+        <meshPhysicalMaterial
+          envMapIntensity={2}
+          color="#F472B6"
+          map={colorMap}
+          clearcoat={0.1}
+          clearcoatRoughness={0.2}
+          roughness={10}
+          metalness={0.9}
+          smoothShading
+        />
       </mesh>
-      <lineSegments geometry={edges} renderOrder={100} opac>
-        <lineBasicMaterial color="#555588" opacity={0.5} transparent />
+      <lineSegments geometry={edges} renderOrder={100}>
+        <lineBasicMaterial color="#aaaaff" opacity={0.5} transparent />
       </lineSegments>
     </group>
   )
@@ -161,6 +171,12 @@ const IdeViewer = ({ Loading }) => {
   const pink400 = '#F472B6'
   const indigo300 = '#A5B4FC'
   const indigo900 = '#312E81'
+  const jscadLightIntensity =
+    state.objectData?.type === 'geometry' &&
+    state.objectData?.data &&
+    state.objectData?.data.length
+      ? 0.5
+      : 1.2
   return (
     <div className="relative h-full bg-ch-gray-800">
       {state.isLoading && Loading}
@@ -186,7 +202,7 @@ const IdeViewer = ({ Loading }) => {
         }`}
         onMouseDown={() => setIsDragging(true)}
       >
-        <Canvas>
+        <Canvas linear={true} dpr={[1, 2]}>
           <Controls
             onDragStart={() => setIsDragging(true)}
             onInit={onInit}
@@ -211,11 +227,24 @@ const IdeViewer = ({ Loading }) => {
               })
             }}
           />
-          <PerspectiveCamera makeDefault up={[0, 0, 1]} />
+          <PerspectiveCamera makeDefault up={[0, 0, 1]}>
+            <pointLight
+              position={[0, 0, 100]}
+              intensity={jscadLightIntensity}
+            />
+          </PerspectiveCamera>
           <ambientLight intensity={0.3} />
-          <pointLight position={[15, 5, 10]} intensity={0.1} />
-          <pointLight position={[-1000, -1000, -1000]} intensity={1} />
-          <pointLight position={[-1000, 0, 1000]} intensity={1} />
+          <Environment preset="warehouse" />
+          <pointLight
+            position={[-1000, -1000, -1000]}
+            color="#5555FF"
+            intensity={0.5}
+          />
+          <pointLight
+            position={[-1000, 0, 1000]}
+            color="#5555FF"
+            intensity={0.5}
+          />
           <gridHelper
             args={[200, 20, 0xff5555, 0x555555]}
             material-opacity={0.2}
