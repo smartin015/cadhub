@@ -23,7 +23,7 @@ const EditorMenu = () => {
                 key={menu.label + '-dropdown'}
               >
                 {menu.items.map((itemConfig) => (
-                  <itemConfig.component
+                  <itemConfig.Component
                     state={state}
                     thunkDispatch={thunkDispatch}
                     config={itemConfig}
@@ -48,7 +48,24 @@ const EditorMenu = () => {
             <Svg name="gear" className="w-6 p-px" />
           </button>
         </div>
-        <CadPackage cadPackage={state.ideType} className="px-3" />
+        <CadPackage
+          cadPackage={state.ideType}
+          className="px-3"
+          onClick={() => {
+            thunkDispatch({
+              type: 'addEditorModel',
+              payload: {
+                type: 'guide',
+                label: 'Guide',
+                content: state.ideGuide,
+              },
+            })
+            thunkDispatch({
+              type: 'switchEditorModel',
+              payload: state.models.length,
+            })
+          }}
+        />
       </div>
       <AllShortcutsModal />
     </>
