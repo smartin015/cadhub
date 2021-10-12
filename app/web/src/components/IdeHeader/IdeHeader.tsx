@@ -12,7 +12,6 @@ import CaptureButton from 'src/components/CaptureButton/CaptureButton'
 import { useIdeContext } from 'src/helpers/hooks/useIdeContext'
 import Gravatar from 'src/components/Gravatar/Gravatar'
 import EditableProjectTitle from 'src/components/EditableProjecTitle/EditableProjecTitle'
-import SocialCardModal from 'src/components/SocialCardModal/SocialCardModal'
 
 const FORK_PROJECT_MUTATION = gql`
   mutation ForkProjectMutation($input: ForkProjectInput!) {
@@ -60,13 +59,16 @@ export default function IdeHeader({
   context: 'ide' | 'profile'
 }) {
   const { currentUser } = useAuth()
-  const { project } = useIdeContext()
+  const { project, state } = useIdeContext()
+  const hasUnsavedChanges =
+    project?.code && state?.code && project?.code !== state?.code
 
   const isProfile = context === 'profile'
   const canEdit =
     (currentUser && currentUser?.sub === project?.user?.id) ||
     currentUser?.roles?.includes('admin')
   const projectOwner = project?.user?.userName
+  const showForkMessage = !canEdit && hasUnsavedChanges && currentUser?.sub
 
   const [createFork] = useMutation(FORK_PROJECT_MUTATION, {
     onCompleted: ({ forkProject }) => {
@@ -205,10 +207,23 @@ export default function IdeHeader({
             <TopButton
               onClick={handleFork}
               name="Fork"
-              className=" bg-ch-blue-650 bg-opacity-30 hover:bg-opacity-80 text-ch-gray-300"
+              className={
+                showForkMessage
+                  ? ' bg-ch-blue-650 bg-opacity-80 hover:bg-opacity-100 text-ch-gray-300 border-blue-300 border-2'
+                  : ' bg-ch-blue-650 bg-opacity-30 hover:bg-opacity-80 text-ch-gray-300'
+              }
             >
               <Svg name="fork-new" className="w-6 h-6 text-ch-blue-400" />
             </TopButton>
+          )}
+          {showForkMessage && (
+            <div className="fixed bg-white w-60 h-10 top-16 right-24 z-10 rounded-md text-sm flex p-2 items-center">
+              <Svg
+                name="exclamation-circle"
+                className="w-8 h-8 mx-2 text-ch-blue-500"
+              />{' '}
+              Fork to save your work
+            </div>
           )}
         </div>
       </div>
