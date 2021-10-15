@@ -1,16 +1,15 @@
 import { useMemo } from 'react'
-import { Link, routes } from '@redwoodjs/router'
-import Svg from 'src/components/Svg/Svg'
-import CadPackage from 'src/components/CadPackage/CadPackage'
-
-import { countEmotes } from 'src/helpers/emote'
-import ImageUploader from 'src/components/ImageUploader'
+import type { Projects_Of_User } from 'types/graphql'
 import ProjectCard from 'src/components/ProjectCard/ProjectCard'
 
 const ProjectsList = ({
   projects,
   shouldFilterProjectsWithoutImage = false,
   projectLimit = 80,
+}: {
+  projects: Projects_Of_User['projects']
+  shouldFilterProjectsWithoutImage: boolean
+  projectLimit: number
 }) => {
   // temporary filtering projects that don't have images until some kind of search is added and there are more things on the website
   // it helps avoid the look of the website just being filled with dumby data.
@@ -23,7 +22,7 @@ const ProjectsList = ({
         ? projects
             .filter(({ mainImage }) => mainImage)
             .slice(0, projectLimit || 80)
-        : [...projects]
+        : [...projects].slice(0, projectLimit || 80)
       )
         // sort should probably be done on the service, but the filtering is temp too
         .sort(
@@ -45,7 +44,7 @@ const ProjectsList = ({
             index
           ) => (
             <ProjectCard
-              key={index}
+              key={`project-card-${index}`}
               title={title}
               mainImage={mainImage}
               user={user}
