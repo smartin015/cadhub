@@ -4,6 +4,8 @@ import { makeStlDownloadHandler, PullTitleFromFirstLine } from './helpers'
 import { useSaveCode } from 'src/components/IdeWrapper/useSaveCode'
 import { DropdownItem } from './Dropdowns'
 import { useShortcutsModalContext } from './AllShortcutsModal'
+import type { State } from 'src/helpers/hooks/useIdeState'
+import { useIdeContext } from 'src/helpers/hooks/useIdeContext'
 
 export function cmdOrCtrl() {
   return /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform) ? '⌘' : 'Ctrl'
@@ -39,12 +41,13 @@ const fileMenuConfig: EditorMenuConfig = {
       shortcutLabel: cmdOrCtrl() + ' Shift D',
       Component: (props) => {
         const { state, thunkDispatch, config } = props
+        const {project} = useIdeContext()
         const handleStlDownload = makeStlDownloadHandler({
           type: state.objectData?.type,
           ideType: state.ideType,
           geometry: state.objectData?.data,
           quality: state.objectData?.quality,
-          fileName: PullTitleFromFirstLine(state.code || ''),
+          fileName: project? `${ project.title}.stl` : PullTitleFromFirstLine(state.code || ''),
           thunkDispatch,
         })
 
@@ -94,11 +97,14 @@ const viewMenuConfig: EditorMenuConfig = {
 
 export const editorMenuConfig = [fileMenuConfig, editMenuConfig, viewMenuConfig]
 
-export interface EditorMenuItemConfig {
+interface EditorMenuItemConfigBase {
   label: string
   shortcut: string
   shortcutLabel: React.ReactElement | string
-  Component: (props: any) => React.ReactElement
+  callback?: (...a: any[]) => void
+}
+export interface EditorMenuItemConfig extends EditorMenuItemConfigBase {
+  Component: React.FC<{config: EditorMenuItemConfigBase, state: State, thunkDispatch: any}>
 }
 
 export interface EditorMenuConfig {
