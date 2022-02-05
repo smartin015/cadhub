@@ -1,0 +1,4 @@
+projects:
+  some-project:
+    description: It's a project!
+    source: ./project.py
