@@ -23,19 +23,18 @@ function configureLogger(level: string) {
 export interface Project {
   title: string;
   description: string;
-  source: string;
   manifest: string;
+  code: string;
   private: boolean;
 }
 
 export interface Manifest {
-  filePath: string;
+  source?: string;
   projects: Project[];
 }
 
 async function inPrivateRepository(filename: string): Promise<boolean> {
   let baseDir = path.dirname(path.resolve(filename));
-  console.log('checking private repo: ' + baseDir);
   let git: any;
   try {
     git = simpleGit({baseDir});
@@ -58,16 +57,16 @@ async function inPrivateRepository(filename: string): Promise<boolean> {
   return resp.status === 401; // 401 Unauthorized implies private repo 
 }
 
-export async function loadManifest(filePath: string): Promise<Manifest> {
-  let data = await fs.readFile(filePath);
-  let yaml = YAML.parse(data.toString());
-  let m: Manifest = {filePath, projects: []};
+export async function parseManifest(source: string, data: string): Promise<Manifest> {
+  let yaml = YAML.parse(data);
+  let m: Manifest = {source, projects: []};
   for (let [title, cfg] of (Object.entries(yaml.projects) as any)) {
+    console.warn("TODO need to load cfg.source into project and possibly resolve description as well");
     m.projects.push({
       title, 
       description: cfg.description,
-      source: cfg.source,
-      manifest: filePath,
+      code: "TODO",
+      manifest: source,
       private: await inPrivateRepository(cfg.source),
     });
   }
@@ -78,7 +77,6 @@ export async function loadManifest(filePath: string): Promise<Manifest> {
 export interface ValidationOptions {
   allowPrivate: boolean;
   allowDifferentOwner: boolean;
-  
 }
 export function filterValidProjects(id: string, manifests: Manifest[], managedBy: {[title: string]: string}, options: ValidationOptions, logger: winston.Logger): Project[] {
   // TODO implement
@@ -104,7 +102,7 @@ export function filterValidProjects(id: string, manifests: Manifest[], managedBy
         }
       }
       if (projects[p.title] !== undefined) {
-        logger.error(`Project projects in manifest at ${m.filePath} already configured in manifest at ${projects[p.title].manifest}; skipping`); 
+        logger.error(`Project projects in manifest at ${m.source} already configured in manifest at ${projects[p.title].manifest}; skipping`); 
         continue;
       }
       projects[p.title] = p;
@@ -138,87 +136,52 @@ export class CADHub {
   }
 }
 
+interface PushOptions extends ValidationOptions {
+  dryRun: boolean;
+  deleteMissing: boolean;
+}
 
-async function doPush(argv: any, logger: winston.Logger) {
-  logger.info(`Reading JWT at ${argv.jwt}`);
-  const jwt_encoded = (await fs.readFile(argv.jwt)).toString();
-  const jwt_decoded: any = jwt_decode(jwt_encoded);
-  const id = jwt_decoded['PusherID'];
-  if (id === undefined) {
-    throw Error(`JWT does not include PusherID field! Is this the right token?`);
-  } else {
-    logger.debug(`Pusher ID is: ${id}`);
+async function doPush(id: string, api: CADHub, manifests: Manifest[], opts: PushOptions, logger: winston.Logger) {
+  let titles: Set<string> = new Set(manifests.reduce((acc: string[], m: Manifest) => acc.concat(Object.keys(m.projects)), []));
+  let managedBy = await api.fetchProjectPushers(titles);
+
+  let projects = filterValidProjects(id, manifests, managedBy, opts, logger);
+  const num_managed = Object.values(managedBy).reduce((sum, m) => sum + ((m === id) ? 1 : 0), 0);
+  logger.info(`Pusher ${id} currently manages ${num_managed} project(s)`);
+ 
+  let unmanaged = Array.from(titles).filter((n) => managedBy[n] === undefined);
+  logger.info(`Parsed ${manifests.length} file(s) describing ${projects.length} project(s) (${unmanaged.length} newly managed)`);
+
+  let pushed = [];
+  for (let p of projects) { 
+    if (opts.dryRun) {
+      logger.warn(`Skipping push of project ${p.title} (dry run)`);
+    } else {
+      pushed.push(await api.pushProject(id, p));
+    }
   }
 
-  const api = new CADHub(argv.cadhub_url_base, jwt_encoded);
-
-  logger.info(`Searching for files with glob ${argv.glob}`);
-  glob(argv.glob, async (er, files) => {
-    if (er !== null) {
-      throw er;
-    }
-    if (files.length === 0) {
-      throw Error("Glob returned 0 files");
-    }
-    
-    logger.info(`Found ${files.length} file(s)`); 
-    let manifests: Manifest[] = [];
-    let titleArr: string[] = [];
-    for (let filePath of files) {
-      try {
-        let m = await loadManifest(filePath);
-        manifests.push(m);
-        titleArr = titleArr.concat(Object.keys(m.projects));
-      } catch(e) {
-        logger.error(`Error loading manifest at ${filePath}: ${e}`);
-      }
-    }
- 
-    let titles: Set<string> = new Set(titleArr);
-    let managedBy = await api.fetchProjectPushers(titles);
-
-    let projects = filterValidProjects(id, manifests, managedBy, {
-        allowPrivate: argv.allow_private_repository_publish,
-        allowDifferentOwner: argv.overwrite_other_upload_sources
-    }, logger);
-    const num_managed = Object.values(managedBy).reduce((sum, m) => sum + ((m === id) ? 1 : 0), 0);
-    logger.info(`Pusher ${id} currently manages ${num_managed} project(s)`);
-   
-    let unmanaged = Array.from(titles).filter((n) => managedBy[n] === undefined);
-    logger.info(`Parsed ${manifests.length} file(s) describing ${projects.length} project(s) (${unmanaged.length} newly managed)`);
-
-    let pushed = [];
-    for (let p of projects) { 
-      if (argv.dry_run) {
-        logger.warn(`Skipping push of project ${p.title} (dry run)`);
+  let dangling = Object.keys(managedBy).filter(n => !titles.has(n));
+  logger.warn(`Found ${dangling.length} dangling project(s): ${dangling.join(', ')}`);
+  let deleted = [];
+  if (opts.deleteMissing) {
+    for (let n of dangling) {
+      if (opts.dryRun) {
+        logger.warn(`Skipping deletion of project ${n} (dry run)`);
       } else {
-        pushed.push(await api.pushProject(id, p));
+        deleted.push(await api.deleteProject(n))
       }
     }
+  } else {
+    logger.info('Not deleting projects (--delete_missing_projects is not set)');
+  }
 
-    let dangling = Object.keys(managedBy).filter(n => !titles.has(n));
-    logger.warn(`Found ${dangling.length} dangling project(s): ${dangling.join(', ')}`);
-    let deleted = [];
-    if (argv.delete_missing_projects) {
-      for (let n of dangling) {
-        if (argv.dry_run) {
-          logger.warn(`Skipping deletion of project ${n} (dry run)`);
-        } else {
-          deleted.push(await api.deleteProject(n))
-        }
-      }
-    } else {
-      logger.info('Not deleting projects (--delete_missing_projects is not set)');
-    }
-
-    logger.debug(`Awaiting pushes/deletions`);
-    let results = await Promise.all(pushed.concat(deleted));
-    const num_pushed = results.slice(0, pushed.length).reduce((sum, r) => sum + ((r) ? 1 : 0), 0);
-    const num_deleted = results.slice(pushed.length).reduce((sum, r) => sum + ((r) ? 1 : 0), 0);
-    logger.info(`Pushed ${num_pushed} / ${projects.length} projects`);
-    logger.info(`Deleted ${num_deleted} dangling projects`);
-  });
-
+  logger.debug(`Awaiting pushes/deletions`);
+  let results = await Promise.all(pushed.concat(deleted));
+  const num_pushed = results.slice(0, pushed.length).reduce((sum, r) => sum + ((r) ? 1 : 0), 0);
+  const num_deleted = results.slice(pushed.length).reduce((sum, r) => sum + ((r) ? 1 : 0), 0);
+  logger.info(`Pushed ${num_pushed} / ${projects.length} projects`);
+  logger.info(`Deleted ${num_deleted} dangling projects`);
 }
 
 async function main() {
@@ -272,7 +235,45 @@ async function main() {
 
   switch (argv._[0]) {
     case 'push':
-      doPush(argv, logger);
+      logger.info(`Reading JWT at ${(argv as any).jwt}`);
+      const jwt_encoded = (await fs.readFile((argv as any).jwt)).toString();
+      const jwt_decoded: any = jwt_decode(jwt_encoded);
+      const id = jwt_decoded['PusherID'];
+      if (id === undefined) {
+        throw Error(`JWT does not include PusherID field! Is this the right token?`);
+      } else {
+        logger.debug(`Pusher ID is: ${id}`);
+      }
+      const api = new CADHub(argv.api_url_base, jwt_encoded);
+
+      
+      logger.info(`Searching for files with glob ${argv.glob}`);
+      glob((argv as any).glob, async (er, files) => {
+        if (er !== null) {
+          throw er;
+        }
+        if (files.length === 0) {
+          throw Error("Glob returned 0 files");
+        }
+        
+        logger.info(`Found ${files.length} file(s)`); 
+        let manifests: Manifest[] = [];
+        for (let filePath of files) {
+          try {
+            let data = await fs.readFile(filePath);
+            let m = await parseManifest(filePath, data.toString());
+            manifests.push(m);
+          } catch(e) {
+            logger.error(`Error loading manifest at ${filePath}: ${e}`);
+          }
+        }
+        await doPush(id, api, manifests, {
+          allowPrivate: argv.allow_private_repository_publish,
+          allowDifferentOwner: argv.overwrite_other_upload_sources,
+          dryRun: argv.dry_run,
+          deleteMissing: argv.delete_missing_projects,
+        }, logger);
+      });
       break;
     default:
       throw Error(`Unknown command ${argv._[0]}`);
